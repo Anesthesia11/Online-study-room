@@ -36,6 +36,12 @@ const peers = new Map();
 const mediaTiles = new Map();
 const mediaState = { audio: false, video: false, screen: false };
 const tileVisibility = new Map();
+let pageFullTileUser = "";
+let fullscreenOwner = "";
+
+if (document.body) {
+  document.body.dataset.pageFull = "false";
+}
 
 const JOIN_SESSION_KEY = "studyRoomJoin";
 const THEME_KEY = "studyRoomTheme";
@@ -51,7 +57,7 @@ const rtcConfig = {
 };
 
 // 根据需要替换成自己的后端地址
-const wsBase = "wss://api.（你的域名）";
+const wsBase = "wss://api.zjbstudy.top";
 
 let currentTheme = "dark";
 let timerCycle = "focus";
@@ -777,12 +783,29 @@ function ensureMediaTile(user) {
 
   const header = document.createElement("div");
   header.className = "media-tile__header";
+  const titleWrap = document.createElement("div");
+  titleWrap.className = "media-tile__title";
   const nameEl = document.createElement("strong");
   nameEl.textContent = user;
   const statusEl = document.createElement("span");
   statusEl.className = "media-tile__status";
   statusEl.textContent = "未开启设备";
-  header.append(nameEl, statusEl);
+  titleWrap.append(nameEl, statusEl);
+
+  const viewActions = document.createElement("div");
+  viewActions.className = "media-tile__actions";
+  const pageFullBtn = document.createElement("button");
+  pageFullBtn.type = "button";
+  pageFullBtn.className = "media-view-btn";
+  pageFullBtn.dataset.active = "false";
+  pageFullBtn.textContent = "网页全屏";
+  const fullscreenBtn = document.createElement("button");
+  fullscreenBtn.type = "button";
+  fullscreenBtn.className = "media-view-btn";
+  fullscreenBtn.dataset.active = "false";
+  fullscreenBtn.textContent = "全屏";
+  viewActions.append(pageFullBtn, fullscreenBtn);
+  header.append(titleWrap, viewActions);
 
   const cameraVideo = document.createElement("video");
   cameraVideo.autoplay = true;
@@ -835,6 +858,12 @@ function ensureMediaTile(user) {
     });
   });
 
+  pageFullBtn.addEventListener("click", () => {
+    togglePageFullscreen(user);
+  });
+  fullscreenBtn.addEventListener("click", () => {
+    toggleNativeFullscreen(user);
+  });
   cameraToggle.addEventListener("click", () => {
     toggleTileSection(user, "camera");
   });
@@ -851,15 +880,28 @@ function ensureMediaTile(user) {
     audioEl,
     cameraToggle,
     screenToggle,
+    pageFullBtn,
+    fullscreenBtn,
   };
   mediaTiles.set(user, info);
   applyTileVisibility(user);
+  updatePageFullscreenButtons();
+  updateFullscreenButtons();
   return info;
 }
 
 function removeMediaTile(user) {
   const info = mediaTiles.get(user);
   if (!info) return;
+  if (pageFullTileUser === user) {
+    exitPageFullscreen();
+  }
+  if (fullscreenOwner === user && document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  if (fullscreenOwner === user) {
+    fullscreenOwner = "";
+  }
   if (info.cameraVideo.srcObject) {
     info.cameraVideo.srcObject = null;
   }
@@ -873,6 +915,8 @@ function removeMediaTile(user) {
   info.tile.remove();
   mediaTiles.delete(user);
   tileVisibility.delete(user);
+  updatePageFullscreenButtons();
+  updateFullscreenButtons();
 }
 
 function updateTileStatus(user, state) {
@@ -972,9 +1016,154 @@ function applyTileVisibility(user) {
 
   const anyStream = cameraStream || screenStream;
   const anyVisible = showCamera || showScreen;
-  info.placeholder.hidden = anyVisible;
-  info.placeholder.dataset.folded = String(anyStream && !anyVisible);
-  info.placeholder.textContent = anyStream && !anyVisible ? "画面已折叠" : "暂无画面";
+  const showFoldNotice = anyStream && !anyVisible;
+  const hasDeclaredMedia =
+    user === localUser
+      ? mediaState.video || mediaState.screen
+      : Boolean(remoteMediaStates[user]?.video || remoteMediaStates[user]?.screen);
+
+  const ensurePlaceholderMounted = () => {
+    if (!info.placeholder.isConnected) {
+      info.tile.insertBefore(info.placeholder, info.audioEl);
+    }
+  };
+
+  const showPlaceholder = (text, folded) => {
+    ensurePlaceholderMounted();
+    info.placeholder.classList.remove("media-placeholder--hidden");
+    info.placeholder.hidden = false;
+    info.placeholder.dataset.folded = folded ? "true" : "false";
+    info.placeholder.textContent = text;
+  };
+
+  const hidePlaceholder = () => {
+    if (info.placeholder.isConnected) {
+      info.placeholder.remove();
+    }
+    info.placeholder.classList.add("media-placeholder--hidden");
+    info.placeholder.hidden = true;
+    info.placeholder.dataset.folded = "false";
+    info.placeholder.textContent = "";
+  };
+
+  if (showFoldNotice) {
+    showPlaceholder("画面已折叠", true);
+  } else if (!anyStream && !hasDeclaredMedia) {
+    showPlaceholder("暂无画面", false);
+  } else {
+    hidePlaceholder();
+  }
+}
+
+function updatePageFullscreenButtons() {
+  mediaTiles.forEach((info, user) => {
+    if (!info.pageFullBtn) return;
+    const active = pageFullTileUser === user;
+    info.pageFullBtn.dataset.active = String(active);
+    info.pageFullBtn.textContent = active ? "退出网页全屏" : "网页全屏";
+  });
+}
+
+function enterPageFullscreen(user) {
+  const info = mediaTiles.get(user);
+  if (!info) return;
+  if (pageFullTileUser === user) return;
+  exitPageFullscreen();
+  info.tile.classList.add("media-tile--page-full");
+  pageFullTileUser = user;
+  if (document.body) {
+    document.body.dataset.pageFull = "true";
+  }
+  updatePageFullscreenButtons();
+}
+
+function exitPageFullscreen() {
+  if (pageFullTileUser) {
+    const info = mediaTiles.get(pageFullTileUser);
+    if (info) {
+      info.tile.classList.remove("media-tile--page-full");
+    }
+    pageFullTileUser = "";
+  }
+  if (document.body) {
+    document.body.dataset.pageFull = "false";
+  }
+  updatePageFullscreenButtons();
+}
+
+function togglePageFullscreen(user) {
+  if (pageFullTileUser === user) {
+    exitPageFullscreen();
+  } else {
+    enterPageFullscreen(user);
+  }
+}
+
+function getPreferredMediaElement(info) {
+  if (!info) return null;
+  if (!info.screenVideo.hidden && hasActiveStream(info.screenVideo)) {
+    return info.screenVideo;
+  }
+  if (!info.cameraVideo.hidden && hasActiveStream(info.cameraVideo)) {
+    return info.cameraVideo;
+  }
+  if (hasActiveStream(info.screenVideo)) {
+    return info.screenVideo;
+  }
+  if (hasActiveStream(info.cameraVideo)) {
+    return info.cameraVideo;
+  }
+  if (info.placeholder && !info.placeholder.hidden) {
+    return info.placeholder;
+  }
+  return info.tile;
+}
+
+async function requestNativeFullscreen(user) {
+  const info = mediaTiles.get(user);
+  if (!info) return;
+  exitPageFullscreen();
+  const target = getPreferredMediaElement(info);
+  if (!target || typeof target.requestFullscreen !== "function") {
+    return;
+  }
+  try {
+    await target.requestFullscreen();
+    fullscreenOwner = user;
+  } catch (error) {
+    fullscreenOwner = "";
+    if (error && error.message) {
+      logItem(eventsList, `进入全屏失败：${error.message}`);
+    } else {
+      logItem(eventsList, "进入全屏失败");
+    }
+  }
+  updateFullscreenButtons();
+}
+
+async function toggleNativeFullscreen(user) {
+  if (document.fullscreenElement && fullscreenOwner === user) {
+    document.exitFullscreen().catch(() => {});
+    return;
+  }
+  if (document.fullscreenElement && fullscreenOwner !== user) {
+    try {
+      await document.exitFullscreen();
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  requestNativeFullscreen(user);
+}
+
+function updateFullscreenButtons() {
+  const active = Boolean(document.fullscreenElement);
+  mediaTiles.forEach((info, user) => {
+    if (!info.fullscreenBtn) return;
+    const ownsFullscreen = active && fullscreenOwner === user;
+    info.fullscreenBtn.dataset.active = String(ownsFullscreen);
+    info.fullscreenBtn.textContent = ownsFullscreen ? "退出全屏" : "全屏";
+  });
 }
 
 function syncPeers(participants) {
@@ -1256,6 +1445,12 @@ function stopAllMedia() {
 }
 
 function cleanupPeers() {
+  exitPageFullscreen();
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  fullscreenOwner = "";
+  updateFullscreenButtons();
   peers.forEach((_, user) => closePeer(user));
   peers.clear();
   remoteMediaStates = {};
@@ -1395,6 +1590,19 @@ if (screenBtn) {
     toggleScreenShare();
   });
 }
+
+document.addEventListener("fullscreenchange", () => {
+  if (!document.fullscreenElement) {
+    fullscreenOwner = "";
+  }
+  updateFullscreenButtons();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && pageFullTileUser && !document.fullscreenElement) {
+    exitPageFullscreen();
+  }
+});
 
 window.addEventListener("beforeunload", () => {
   const departingUser = localUser || currentUserName;

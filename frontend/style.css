@@ -573,6 +573,53 @@ ul {
   box-shadow: 0 18px 35px rgba(34, 54, 105, 0.12);
 }
 
+body[data-page-full="true"] {
+  overflow: hidden;
+}
+
+body[data-page-full="true"]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 12, 30, 0.55);
+  pointer-events: none;
+  z-index: 1100;
+}
+
+.media-tile--page-full {
+  position: fixed;
+  inset: 1rem;
+  width: auto;
+  max-width: calc(100vw - 2rem);
+  height: calc(100vh - 2rem);
+  z-index: 1200;
+  box-shadow: 0 35px 90px rgba(15, 26, 55, 0.55);
+  transform: none;
+  grid-column: 1 / -1;
+  background: var(--tile-bg);
+  overflow: hidden;
+}
+
+.media-tile--page-full .media-tile__header,
+.media-tile--page-full .media-tile__toggles {
+  flex-shrink: 0;
+}
+
+.media-tile--page-full video,
+.media-tile--page-full .media-placeholder {
+  flex: 1;
+  min-height: 0;
+  object-fit: contain;
+}
+
+@media (max-width: 640px) {
+  .media-tile--page-full {
+    inset: 0.5rem;
+    height: calc(100vh - 1rem);
+    max-width: calc(100vw - 1rem);
+  }
+}
+
 .media-tile__toggles {
   display: flex;
   gap: 0.4rem;
@@ -606,6 +653,41 @@ ul {
   justify-content: space-between;
   align-items: center;
   font-size: 0.9rem;
+}
+
+.media-tile__title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.media-tile__actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.media-view-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(213, 220, 255, 0.6);
+  background: transparent;
+  color: var(--muted-color);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.media-view-btn:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.media-view-btn[data-active="true"] {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 
 .media-tile__status {
@@ -642,6 +724,14 @@ ul {
   justify-content: center;
   color: var(--placeholder-color);
   font-weight: 600;
+}
+
+.media-placeholder--hidden {
+  display: none !important;
+}
+
+.media-tile video:not([hidden]) ~ .media-placeholder {
+  display: none;
 }
 
 .media-placeholder[data-folded="true"] {
