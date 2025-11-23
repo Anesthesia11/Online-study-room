@@ -1,3 +1,5 @@
+"""FastAPI backend for a lightweight online study room."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +12,7 @@ from pydantic import BaseModel, Field, validator
 
 
 class RoomConfig(BaseModel):
-    """用于创建或更新房间的负载数据。"""
+    """Payload used to create or update a room."""
 
     room_id: str = Field(..., min_length=3, max_length=32)
     goal: str = Field(default="")
@@ -21,12 +23,12 @@ class RoomConfig(BaseModel):
     def room_id_slug(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned.isalnum():
-            raise ValueError("room_id 必须是字母数字。")
+            raise ValueError("room_id must be alphanumeric.")
         return cleaned.lower()
 
 
 class RoomState(BaseModel):
-    """房间的当前公开状态。"""
+    """Current public state of a room."""
 
     room_id: str
     goal: str
@@ -42,15 +44,15 @@ class RoomState(BaseModel):
 
 
 class Room:
-    """表示一个单独的学习房间，包含计时器和聊天状态。"""
+    """Represents a single study room with timer and chat state."""
 
     def __init__(self, config: RoomConfig):
         self.room_id = config.room_id
         self.goal = config.goal
         self.timer_length = config.timer_length
         self.break_length = config.break_length
-        self.status = "idle"  # 空闲 | 运行中 | 已暂停
-        self.cycle = "focus"  # 专注 | 休息
+        self.status = "idle"  # idle | running | paused
+        self.cycle = "focus"  # focus | break
         self.remaining = self.timer_length
         self.updated_at = time.time()
         self.participants: Dict[str, float] = {}
@@ -269,7 +271,7 @@ class Room:
 
 
 class RoomManager:
-    """跟踪管理多个房间。"""
+    """Keeps track of multiple rooms."""
 
     def __init__(self) -> None:
         self.rooms: Dict[str, Room] = {}
@@ -300,7 +302,7 @@ class RoomManager:
 
 manager = RoomManager()
 
-app = FastAPI(title="在线学习室 API")
+app = FastAPI(title="Online Study Room API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -340,7 +342,7 @@ async def get_room(room_id: str) -> RoomState:
     try:
         room = await manager.get(room_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="房间未找到") from exc
+        raise HTTPException(status_code=404, detail="Room not found") from exc
     return await room.serialize()
 
 
@@ -349,7 +351,7 @@ async def reset_room(room_id: str, user: str = "system") -> RoomState:
     try:
         room = await manager.get(room_id)
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail="房间未找到") from exc
+        raise HTTPException(status_code=404, detail="Room not found") from exc
     await room.reset(user=user)
     return await room.serialize()
 
@@ -369,7 +371,15 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
 
     try:
         while True:
-            raw = await websocket.receive_json()
+            try:
+                raw = await websocket.receive_json()
+            except RuntimeError as exc:
+                # Starlette raises RuntimeError instead of WebSocketDisconnect
+                # when the client disappears before we can accept / read.
+                message = str(exc)
+                if "WebSocket is not connected" in message:
+                    raise WebSocketDisconnect() from exc
+                raise
             message = Message(**raw)
             user = message.user or user_name
 
@@ -425,6 +435,12 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                 }
                 await room.send_to_user(message.target, payload)
     except WebSocketDisconnect:
+        await room.disconnect(websocket)
+    except RuntimeError as exc:
+        # Some uvicorn/starlette versions bubble a RuntimeError instead of
+        # WebSocketDisconnect when the client closes the tab abruptly.
+        if "WebSocket is not connected" not in str(exc):
+            raise
         await room.disconnect(websocket)
     finally:
         await room.remove_participant(user_name)
