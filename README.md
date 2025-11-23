@@ -1,5 +1,4 @@
 # Online-study-room
-包含 FastAPI WebSocket 后端与纯静态前端，可在本地演示“多人在线 + 音视频 + 个人番茄钟 + 聊天”体验。
 
 ## 目录结构
 
